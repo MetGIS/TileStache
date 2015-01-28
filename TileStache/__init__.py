@@ -278,15 +278,13 @@ def requestHandler2(config_hint, path_info, query_string=None, script_name='', n
                 now = datetime.utcnow()
                 
                 #
-                # set expires date to 3:00 UTC or 15:00 UTC according to current time
+                # set expires date to 5:00 UTC
                 #
-                if now.hour >= 16:
+                if now.hour >= 6:
                     tomorrow = now + timedelta(days=1)
-                    expires = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 4, 00, 00)
-                elif now.hour < 4:
-                    expires = datetime(now.year, now.month, now.day, 4, 00, 00)
-                elif now.hour >= 4 and now.hour < 16:
-                    expires = datetime(now.year, now.month, now.day, 16, 00, 00)
+                    expires = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 6, 00, 00)
+                elif now.hour < 6:
+                    expires = datetime(now.year, now.month, now.day, 6, 00, 00)
                     
                 delta = expires - now
                 

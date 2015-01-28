@@ -31,6 +31,9 @@ from time import time
 import httplib
 import logging
 
+#MetGIS edit
+import hashlib
+
 try:
     from json import load as json_load
     from json import loads as json_loads
@@ -184,8 +187,10 @@ def requestLayer(config, path_info):
     layername = splitPathInfo(path_info)[0]
 
     if layername not in config.layers:
-        raise Core.KnownUnknown('"%s" is not a layer I know about. Here are some that I do know about: %s.' % (layername, ', '.join(sorted(config.layers.keys()))))
-
+        #MetGIS edit
+        raise Core.KnownUnknown('"%s" is not a layer I know about.')
+        #raise Core.KnownUnknown('"%s" is not a layer I know about. Here are some that I do know about: %s.' % (layername, ', '.join(sorted(config.layers.keys()))))
+    
     return config.layers[layername]
 
 def requestHandler(config_hint, path_info, query_string=None):
@@ -203,7 +208,9 @@ def requestHandler(config_hint, path_info, query_string=None):
 
     return mimetype, content
 
-def requestHandler2(config_hint, path_info, query_string=None, script_name=''):
+#Metgis edit
+def requestHandler2(config_hint, path_info, query_string=None, script_name='', none_match=''):
+#def requestHandler2(config_hint, path_info, query_string=None, script_name=''):
     """ Generate a set of headers and response body for a given request.
 
         TODO: Replace requestHandler() with this function in TileStache 2.0.0.
@@ -259,6 +266,9 @@ def requestHandler2(config_hint, path_info, query_string=None, script_name=''):
         else:
             status_code, headers, content = layer.getTileResponse(coord, extension)
 
+        if none_match == '"' + hashlib.md5(content).hexdigest() + '"':
+            return 304, Headers([('Date', 'Mon, 29 Sep 2014 10:55:08 GMT')]), 'The feed has not changed since you last checked, so the server sent no data.  This is a feature, not a bug!'
+
         if layer.allowed_origin:
             headers.setdefault('Access-Control-Allow-Origin', layer.allowed_origin)
 
@@ -267,9 +277,37 @@ def requestHandler2(config_hint, path_info, query_string=None, script_name=''):
             content = '%s(%s)' % (callback, content)
 
         if layer.max_cache_age is not None:
-            expires = datetime.utcnow() + timedelta(seconds=layer.max_cache_age)
-            headers.setdefault('Expires', expires.strftime('%a, %d %b %Y %H:%M:%S GMT'))
-            headers.setdefault('Cache-Control', 'public, max-age=%d' % layer.max_cache_age)
+            #
+            # Headers for MetGIS
+            #
+            if layer.max_cache_age == -999:
+                now = datetime.utcnow()
+                
+                #
+                # set expires date to 3:00 UTC or 15:00 UTC according to current time
+                #
+                if now.hour >= 16:
+                    tomorrow = now + timedelta(days=1)
+                    expires = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 4, 00, 00)
+                elif now.hour < 4:
+                    expires = datetime(now.year, now.month, now.day, 4, 00, 00)
+                elif now.hour >= 4 and now.hour < 16:
+                    expires = datetime(now.year, now.month, now.day, 16, 00, 00)
+                    
+                delta = expires - now
+                
+                #headers.setdefault('Expires', expires.strftime('%a, %d %b %Y %H:%M:%S GMT'))
+                headers.setdefault('Cache-Control', 'max-age=%d' % delta.seconds)
+                etag = '"' + hashlib.md5(content).hexdigest() + '"'
+                headers.setdefault('ETag', etag)
+            
+            #
+            # Default headers, with added comma after %a
+            #
+            else:
+                expires = datetime.utcnow() + timedelta(seconds=layer.max_cache_age)
+                headers.setdefault('Expires', expires.strftime('%a, %d %b %Y %H:%M:%S GMT'))
+                headers.setdefault('Cache-Control', 'public, max-age=%d' % layer.max_cache_age)
 
     except Core.KnownUnknown, e:
         out = StringIO()
@@ -383,9 +421,13 @@ class WSGITileServer:
         path_info = environ.get('PATH_INFO', None)
         query_string = environ.get('QUERY_STRING', None)
         script_name = environ.get('SCRIPT_NAME', None)
-
-        status_code, headers, content = requestHandler2(self.config, path_info, query_string, script_name)
-
+        
+        #MetGIS edit
+        none_match = environ.get('HTTP_IF_NONE_MATCH', None)
+        
+        status_code, headers, content = requestHandler2(self.config, path_info, query_string, script_name, none_match)
+        #status_code, headers, content = requestHandler2(self.config, path_info, query_string, script_name)
+        
         return self._response(start_response, status_code, str(content), headers)
 
     def _response(self, start_response, code, content='', headers=None):
@@ -405,7 +447,7 @@ def modpythonHandler(request):
         TODO: Upgrade to new requestHandler() so this can return non-200 HTTP.
 
         Calls requestHandler().
-
+    
         Example Apache configuration for TileStache:
 
         <Directory /home/migurski/public_html/TileStache>
@@ -413,19 +455,19 @@ def modpythonHandler(request):
             PythonHandler TileStache::modpythonHandler
             PythonOption config /etc/tilestache.cfg
         </Directory>
-
+        
         Configuration options, using PythonOption directive:
         - config: path to configuration file, defaults to "tilestache.cfg",
             using request.filename as the current working directory.
     """
     from mod_python import apache
-
+    
     config_path = request.get_options().get('config', 'tilestache.cfg')
     config_path = realpath(pathjoin(dirname(request.filename), config_path))
-
+    
     path_info = request.path_info
     query_string = request.args
-
+    
     mimetype, content = requestHandler(config_path, path_info, query_string)
 
     request.status = apache.HTTP_OK
